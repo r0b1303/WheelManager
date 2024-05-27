@@ -3,19 +3,15 @@ session_start();
 
 // Überprüfen, ob der Benutzer eingeloggt ist
 if (!isset($_SESSION['loggedin']) || $_SESSION['loggedin'] !== true) {
-    // Nicht eingeloggt, leite zur Login-Seite um
     header("Location: login.php");
     exit;
 }
 
-// Überprüfen, ob der angemeldete Benutzer der Admin ist
 if (isset($_SESSION['username']) && $_SESSION['username'] === 'admin') {
-  // Weiterleitung zum Admin-Panel
-  header("Location: admin_panel.php");
-  exit;
+    header("Location: admin_panel.php");
+    exit;
 }
 
-// Verbindung zur Datenbank herstellen
 $db_host = 'localhost';  
 $db_user = 'root';       
 $db_pass = 'root';       
@@ -23,46 +19,35 @@ $db_name = 'user_management';
 
 $conn = new mysqli($db_host, $db_user, $db_pass, $db_name);
 
-// Überprüfen der Verbindung
 if ($conn->connect_error) {
     die("Verbindung fehlgeschlagen: " . $conn->connect_error);
 }
 
-// Eingabe verarbeiten
+$displayMessage = false;  // Flag to control message display
+$success = false;         // Flag to determine message type
+
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $reifentyp = $conn->real_escape_string($_POST['reifentyp']);
     $anzahl = intval($_POST['anzahl']);
     $user_id = $_SESSION['user_id'];
-
     $stmt = $conn->prepare("INSERT INTO reifenwechsel (user_id, reifentyp, anzahl) VALUES (?, ?, ?)");
     $stmt->bind_param("isi", $user_id, $reifentyp, $anzahl);
     $stmt->execute();
-
     if ($stmt->affected_rows > 0) {
-        echo "<p>Daten erfolgreich eingetragen!</p>";
+        $displayMessage = true;
+        $success = true;
     } else {
-        echo "<p>Fehler beim Eintragen der Daten.</p>";
+        $displayMessage = true;
+        $success = false;
     }
     $stmt->close();
 }
 
-// Reifensummen abrufen
-$autoQuery = "SELECT SUM(anzahl) AS total_auto FROM reifenwechsel WHERE user_id = ? AND reifentyp = 'Auto'";
-$motoQuery = "SELECT SUM(anzahl) AS total_moto FROM reifenwechsel WHERE user_id = ? AND reifentyp = 'Motorrad'";
-$stmt = $conn->prepare($autoQuery);
+$historyQuery = "SELECT reifentyp, anzahl, Datum FROM reifenwechsel WHERE user_id = ? ORDER BY Datum DESC";
+$stmt = $conn->prepare($historyQuery);
 $stmt->bind_param("i", $_SESSION['user_id']);
 $stmt->execute();
-$result = $stmt->get_result();
-$autoSum = $result->fetch_assoc()['total_auto'] ?? 0;
-
-$stmt = $conn->prepare($motoQuery);
-$stmt->bind_param("i", $_SESSION['user_id']);
-$stmt->execute();
-$result = $stmt->get_result();
-$motoSum = $result->fetch_assoc()['total_moto'] ?? 0;
-
-$autoCost = $autoSum * 3.50; // Kosten für Autoreifen
-$motoCost = $motoSum * 2.50; // Kosten für Motorradreifen
+$historyResult = $stmt->get_result();
 
 $conn->close();
 ?>
@@ -80,23 +65,25 @@ $conn->close();
             margin: 0;
             padding: 20px;
             display: flex;
+            flex-direction: column;
             justify-content: center;
             align-items: center;
-            height: 100vh;
+            height: auto;
         }
-        .container {
+        .container, .history {
             background: white;
             padding: 20px;
             border-radius: 5px;
             box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
             width: 90%;
             max-width: 600px;
+            margin-bottom: 20px;
         }
-        h1 {
+        h1, h2 {
             color: #333;
             text-align: center;
         }
-        form {
+        form, .history-data {
             margin-top: 20px;
         }
         input, select {
@@ -123,19 +110,55 @@ $conn->close();
             text-align: center;
             margin-top: 20px;
         }
-        .summary {
-            font-size: 16px;
-            text-align: center;
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        th {
+            background-color: #f2f2f2;
+        }
+        #message-container {
+            display: none;
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: #fff;
+            border: 1px solid #ccc;
+            padding: 10px;
+            z-index: 1000;
         }
     </style>
+    <script>
+        function showMessage(success) {
+            var message = success ? "Daten erfolgreich eingetragen!" : "Fehler beim Eintragen der Daten.";
+            var color = success ? "green" : "red";
+            var msgContainer = document.getElementById('message-container');
+            msgContainer.textContent = message;
+            msgContainer.style.color = color;
+            msgContainer.style.display = 'block';
+            setTimeout(function() {
+                msgContainer.style.display = 'none';
+            }, 4000); // Nachricht nach 4 Sekunden ausblenden
+        }
+    </script>
 </head>
 <body>
+    <?php if($displayMessage): ?>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            showMessage(<?php echo $success ? 'true' : 'false'; ?>);
+        });
+    </script>
+    <?php endif; ?>
+    <div id="message-container"></div>
     <div class="container">
-        <h1>Willkommen, <?php echo htmlspecialchars($_SESSION['username']); ?>!</h1>
-        <div class="summary">
-            <p>Autoreifen: <?php echo $autoSum; ?> Stück (<?php echo number_format($autoCost, 2, ',', '.'); ?> €)</p>
-            <p>Motorradreifen: <?php echo $motoSum; ?> Stück (<?php echo number_format($motoCost, 2, ',', '.'); ?> €)</p>
-        </div>
+        <h1>Willkommen, <?php echo htmlspecialchars($_SESSION['username']); ?></h1>
         <form action="index.php" method="post">
             <label for="reifentyp">Reifentyp:</label>
             <select id="reifentyp" name="reifentyp">
@@ -147,6 +170,29 @@ $conn->close();
             <input type="submit" value="Einreichen">
         </form>
         <a href="logout.php" class="logout">Abmelden</a>
+    </div>
+    <div class="history">
+        <h2>Reifenverlauf</h2>
+        <div class="history-data">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Reifentyp</th>
+                        <th>Anzahl</th>
+                        <th>Datum</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php while ($row = $historyResult->fetch_assoc()): ?>
+                    <tr>
+                        <td><?php echo htmlspecialchars($row['reifentyp']); ?></td>
+                        <td><?php echo htmlspecialchars($row['anzahl']); ?></td>
+                        <td><?php echo htmlspecialchars((new DateTime($row['Datum']))->format('H:i \U\h\r \a\m d.m.Y')); ?></td>
+                    </tr>
+                    <?php endwhile; ?>
+                </tbody>
+            </table>
+        </div>
     </div>
 </body>
 </html>
